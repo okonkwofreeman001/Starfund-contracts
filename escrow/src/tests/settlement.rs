@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
     EscrowError, EscrowSettled, InvoiceEscrow, StarfundEscrow, SettlementConfig,
-    SettlementReadiness, SettlementResult, SmeWithdrew, YieldTier,
+    SettlementBatchStatus, SettlementReadiness, SettlementResult, SmeWithdrew, YieldTier,
 };
 use soroban_sdk::{
     symbol_short,
@@ -861,19 +861,47 @@ fn claim_investor_payout_before_settle_panics() {
     client.claim_investor_payout(&investor);
 }
 
-/// An investor that did not participate cannot claim.
+/// An investor that did not participate cannot claim or receive a claimed marker.
 #[test]
-#[should_panic]
-fn claim_investor_payout_non_participant_panics() {
+fn claim_investor_payout_non_participant_has_no_side_effects() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
-    env.mock_all_auths_allowing_non_root_auth();
-    env.mock_auths(&[]);
     default_init(&client, &env, &admin, &sme);
     settle_escrow(&client, &env);
 
     let stranger = Address::generate(&env);
-    client.claim_investor_payout(&stranger);
+    let event_count = env.events().all().events().len();
+    assert_contract_error(
+        client.try_claim_investor_payout(&stranger),
+        EscrowError::NoContributionToClaim,
+    );
+    assert!(!client.is_investor_claimed(&stranger));
+    assert_eq!(env.events().all().events().len(), event_count);
+}
+
+#[test]
+fn claim_investor_payout_after_full_unfund_has_no_side_effects() {
+    let env = Env::default();
+    let (client, token, _contract_id, _treasury) = setup_claim_env(&env, "UNFUNDED", 2_000, 800);
+    let quitter = Address::generate(&env);
+    let stayer = Address::generate(&env);
+    token.stellar.mint(&quitter, &1_000);
+    token.stellar.mint(&stayer, &2_000);
+
+    client.fund(&quitter, &1_000);
+    client.fund(&stayer, &1_000);
+    client.unfund(&quitter, &1_000);
+    client.fund(&stayer, &1_000);
+    client.settle();
+
+    assert_eq!(client.get_contribution(&quitter), 0);
+    let event_count = env.events().all().events().len();
+    assert_contract_error(
+        client.try_claim_investor_payout(&quitter),
+        EscrowError::NoContributionToClaim,
+    );
+    assert!(!client.is_investor_claimed(&quitter));
+    assert_eq!(env.events().all().events().len(), event_count);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1577,6 +1605,7 @@ fn test_partial_settle_sme_happy_path() {
     client.fund(&investor, &(TARGET / 2));
 
     // SME settles early
+    env.ledger().set_timestamp(1_234);
     client.partial_settle(&sme);
 
     let escrow = client.get_escrow();
@@ -1585,6 +1614,8 @@ fn test_partial_settle_sme_happy_path() {
         "Status must be 1 (funded/settleable) after partial_settle"
     );
     assert_eq!(escrow.funded_amount, TARGET / 2);
+    assert_eq!(client.get_partial_settled_at(), Some(1_234));
+    assert_eq!(client.get_settled_at(), None);
 }
 
 #[test]
@@ -3160,6 +3191,41 @@ fn settlement_result_pool_matches_get_settlement_pool() {
     );
 }
 
+#[test]
+fn settle_batch_reports_failures_and_continues_settling() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (first, first_token, first_id, _) = setup_claim_env(&env, "BATCHFIRST", TARGET, 0);
+    let (last, last_token, last_id, _) = setup_claim_env(&env, "BATCHLAST", TARGET, 0);
+    for (client, token) in [(&first, &first_token), (&last, &last_token)] {
+        let investor = Address::generate(&env);
+        token.stellar.mint(&investor, &TARGET);
+        client.fund(&investor, &TARGET);
+    }
+    let executor = deploy(&env);
+    let uninitialized_id = super::deploy_id(&env);
+    let escrows = soroban_sdk::vec![&env, first_id, uninitialized_id, last_id];
+
+    let outcomes = executor.settle_batch(&escrows);
+
+    assert_eq!(outcomes.len(), 3);
+    assert_eq!(
+        outcomes.get(0).unwrap().status,
+        SettlementBatchStatus::Settled
+    );
+    assert_eq!(
+        outcomes.get(1).unwrap().status,
+        SettlementBatchStatus::FailedContract(EscrowError::EscrowNotInitialized as u32)
+    );
+    assert_eq!(
+        outcomes.get(2).unwrap().status,
+        SettlementBatchStatus::Settled
+    );
+    assert_eq!(first.get_escrow().status, 2);
+    assert_eq!(last.get_escrow().status, 2);
+}
+
 /// `SettlementResult.escrow` snapshot must have status == 2 and correct maturity.
 #[test]
 fn settlement_result_escrow_snapshot_fields() {
@@ -3730,7 +3796,7 @@ fn update_yield_bps_fails_when_cancelled() {
     let env = Env::default();
     let (client, _admin) = setup_yield_bps_test(&env, "YLD_ST_03", 800);
 
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     assert_eq!(client.get_escrow().status, 4u32);
 
     assert_contract_error(
@@ -3883,9 +3949,7 @@ fn setup_tiered_pool<'a>(
     (client, token, contract_id, treasury)
 }
 
-/// #94: with investors sitting at different yield tiers, the base-yield pool
-/// reported by `settle` under-states the real liability, while
-/// `get_settlement_pool()` must cover the sum of every tiered claim.
+/// Tier-weighted pool and per-investor claims use the same largest-remainder total.
 #[test]
 fn tiered_settlement_pool_covers_sum_of_investor_payouts() {
     let env = Env::default();
@@ -3912,27 +3976,27 @@ fn tiered_settlement_pool_covers_sum_of_investor_payouts() {
     // Funded: the close snapshot is taken here.
     assert_eq!(client.get_escrow().status, 1u32);
 
+    let pool = client.get_settlement_pool();
+    token.stellar.mint(&contract_id, &(pool - target));
     let result = client.settle();
     assert_eq!(result.escrow.status, 2u32);
 
-    let pool = client.get_settlement_pool();
     let payout_tier = client.compute_investor_payout(&inv_tier);
     let payout_base = client.compute_investor_payout(&inv_base);
+    let base_yield_pool = target + target * 800 / 10_000;
 
     assert!(
-        pool > result.settle_pool,
-        "tier-weighted pool ({pool}) must exceed the base-yield pool ({}) for a mixed-tier escrow",
-        result.settle_pool,
+        pool > base_yield_pool,
+        "tier-weighted pool ({pool}) must exceed base-yield pool ({base_yield_pool})",
     );
+    assert_eq!(result.settle_pool, pool);
     assert_eq!(
         pool,
         payout_tier + payout_base,
-        "get_settlement_pool must equal the exact sum of per-investor payouts",
+        "get_settlement_pool must equal the sum of per-investor payouts",
     );
 
     // Solvency: the SME repays exactly `pool`; both claims must be payable.
-    let extra = pool - target;
-    token.stellar.mint(&contract_id, &extra);
     assert_eq!(token.stellar.balance(&contract_id), pool);
 
     env.ledger().set_timestamp(200);
@@ -3977,17 +4041,22 @@ fn settlement_pool_unchanged_for_uniform_base_yield() {
 #[test]
 fn investor_payout_claimed_event_carries_payout_amount() {
     let env = Env::default();
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
     let (client, token, contract_id, _treasury) =
-        setup_tiered_pool(&env, "PAYEVT", 1_000i128, 800i64, None);
+        setup_tiered_pool(&env, "PAYEVT", 1_000i128, 800i64, Some(tiers));
 
     let investor = Address::generate(&env);
     token.stellar.mint(&investor, &1_000i128);
-    client.fund(&investor, &1_000i128);
+    client.fund_with_commitment(&investor, &1_000i128, &100u64);
     client.settle();
 
     let pool = client.get_settlement_pool();
     token.stellar.mint(&contract_id, &(pool - 1_000i128));
-    env.ledger().set_timestamp(1);
+    env.ledger().set_timestamp(100);
 
     client.claim_investor_payout(&investor);
 
@@ -3996,12 +4065,14 @@ fn investor_payout_claimed_event_carries_payout_amount() {
         investor: investor.clone(),
         invoice_id: client.get_escrow().invoice_id,
         payout: pool,
+        effective_yield_bps: 900,
+        commitment_lock_secs: 100,
     }
     .to_xdr(&env, &contract_id);
 
     assert_eq!(
         env.events().all().events().last().unwrap().clone(),
         expected,
-        "InvestorPayoutClaimed must include the payout amount",
+        "InvestorPayoutClaimed must include payout, effective yield, and commitment lock",
     );
 }

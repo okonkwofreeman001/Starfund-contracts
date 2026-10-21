@@ -1,7 +1,9 @@
 //! Standalone test for MaxUniqueInvestorsCap and UniqueFunderCount functionality
 //! This test file validates the core functionality without dependencies on other test modules
 use super::*;
-use crate::{MaxPerInvestorCapRaised, MaxUniqueInvestorsCapLowered, MinContributionFloorLowered};
+use crate::{
+    EscrowError, MaxPerInvestorCapRaised, MaxUniqueInvestorsCapLowered, MinContributionFloorLowered,
+};
 use soroban_sdk::{Address, Env, String};
 
 #[test]
@@ -1203,7 +1205,7 @@ fn test_get_remaining_investor_slots_post_lower_cap() {
 
     assert_eq!(client.get_remaining_investor_slots(), Some(2));
 
-    client.lower_max_unique_investors(&3u32);
+    client.lower_max_unique_investors(&3u32, &client.get_admin_nonce());
 
     assert_eq!(client.get_remaining_investor_slots(), Some(0));
 }
@@ -1243,9 +1245,14 @@ fn test_lower_min_contribution_floor_success() {
 
     assert_eq!(client.get_min_contribution_floor(), initial_floor);
 
-    let new_floor = client.lower_min_contribution_floor(&5_000i128);
+    let new_floor = client.lower_min_contribution_floor(&5_000i128, &client.get_admin_nonce());
     assert_eq!(new_floor, 5_000i128);
     assert_eq!(client.get_min_contribution_floor(), 5_000i128);
+    assert_eq!(client.get_admin_nonce(), 1);
+    assert_contract_error(
+        client.try_lower_min_contribution_floor(&1_000i128, &0u32),
+        EscrowError::AdminNonceMismatch,
+    );
 }
 
 #[test]
@@ -1280,7 +1287,7 @@ fn test_lower_floor_enforces_new_floor() {
     );
 
     // Lower the floor
-    client.lower_min_contribution_floor(&5_000i128);
+    client.lower_min_contribution_floor(&5_000i128, &client.get_admin_nonce());
     assert_eq!(client.get_min_contribution_floor(), 5_000i128);
 
     // Fund at the new floor level must succeed
@@ -1328,7 +1335,7 @@ fn test_lower_floor_rejects_raise() {
     );
 
     // Attempt to raise the floor
-    client.lower_min_contribution_floor(&20_000i128);
+    client.lower_min_contribution_floor(&20_000i128, &client.get_admin_nonce());
 }
 
 #[test]
@@ -1363,7 +1370,7 @@ fn test_lower_floor_rejects_same_floor() {
     );
 
     // Attempt to set the same floor
-    client.lower_min_contribution_floor(&10_000i128);
+    client.lower_min_contribution_floor(&10_000i128, &client.get_admin_nonce());
 }
 
 #[test]
@@ -1398,7 +1405,7 @@ fn test_lower_floor_rejects_zero() {
     );
 
     // Non-positive floor must be rejected
-    client.lower_min_contribution_floor(&0i128);
+    client.lower_min_contribution_floor(&0i128, &client.get_admin_nonce());
 }
 
 #[test]
@@ -1433,7 +1440,7 @@ fn test_lower_floor_rejects_negative() {
     );
 
     // Negative floor must be rejected
-    client.lower_min_contribution_floor(&-1i128);
+    client.lower_min_contribution_floor(&-1i128, &client.get_admin_nonce());
 }
 
 #[test]
@@ -1472,7 +1479,7 @@ fn test_lower_floor_rejects_non_open_state() {
     assert_eq!(client.get_escrow().status, 1);
 
     // Cannot lower floor in funded state
-    client.lower_min_contribution_floor(&5_000i128);
+    client.lower_min_contribution_floor(&5_000i128, &client.get_admin_nonce());
 }
 
 #[test]
@@ -1505,7 +1512,7 @@ fn test_lower_floor_requires_admin_auth() {
         &None::<u32>,
     );
 
-    client.lower_min_contribution_floor(&5_000i128);
+    client.lower_min_contribution_floor(&5_000i128, &client.get_admin_nonce());
     assert!(
         env.auths().iter().any(|(addr, _)| *addr == admin),
         "admin auth was not recorded for lower_min_contribution_floor"
@@ -1544,7 +1551,7 @@ fn test_lower_floor_unauthorized_panics() {
     );
 
     env.mock_auths(&[]);
-    client.lower_min_contribution_floor(&5_000i128);
+    client.lower_min_contribution_floor(&5_000i128, &client.get_admin_nonce());
 }
 
 #[test]
@@ -1581,7 +1588,7 @@ fn test_lower_floor_emits_event() {
         &None::<u32>,
     );
 
-    client.lower_min_contribution_floor(&5_000i128);
+    client.lower_min_contribution_floor(&5_000i128, &client.get_admin_nonce());
 
     assert_eq!(
         env.events().all(),
@@ -1626,11 +1633,11 @@ fn test_lower_floor_twice_successive() {
     );
 
     assert_eq!(client.get_min_contribution_floor(), 10_000i128);
-    client.lower_min_contribution_floor(&7_000i128);
+    client.lower_min_contribution_floor(&7_000i128, &client.get_admin_nonce());
     assert_eq!(client.get_min_contribution_floor(), 7_000i128);
-    client.lower_min_contribution_floor(&5_000i128);
+    client.lower_min_contribution_floor(&5_000i128, &client.get_admin_nonce());
     assert_eq!(client.get_min_contribution_floor(), 5_000i128);
-    client.lower_min_contribution_floor(&1_000i128);
+    client.lower_min_contribution_floor(&1_000i128, &client.get_admin_nonce());
     assert_eq!(client.get_min_contribution_floor(), 1_000i128);
 }
 
@@ -1665,7 +1672,7 @@ fn test_lower_floor_fund_at_old_floor_still_enforced() {
     );
 
     // Lower floor from 10,000 to 5,000
-    client.lower_min_contribution_floor(&5_000i128);
+    client.lower_min_contribution_floor(&5_000i128, &client.get_admin_nonce());
 
     // Fund at exactly the new floor (5,000) must succeed
     let inv1 = Address::generate(&env);
@@ -1718,7 +1725,7 @@ fn test_lower_floor_unconfigured_succeeds_if_positive() {
 
     // Cannot lower to a positive value since 0 is the current floor and new floor must be < old
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.lower_min_contribution_floor(&5_000i128);
+        client.lower_min_contribution_floor(&5_000i128, &client.get_admin_nonce());
     }))
     .is_err());
 }
@@ -1762,7 +1769,12 @@ fn test_raise_accepted_and_allows_extra_investors() {
     assert_eq!(client.get_unique_funder_count(), 2);
 
     // Raise cap to 4
-    client.raise_max_unique_investors(&4u32);
+    client.raise_max_unique_investors(&4u32, &client.get_admin_nonce());
+    assert_eq!(client.get_admin_nonce(), 1);
+    assert_contract_error(
+        client.try_raise_max_unique_investors(&5u32, &0u32),
+        EscrowError::AdminNonceMismatch,
+    );
 
     // Add two more investors
     let inv3 = Address::generate(&env);
@@ -1804,7 +1816,7 @@ fn test_raise_equal_rejected() {
         &None::<u32>,
     );
     // Attempt raise to same value -> should Err(NewCapNotHigher)
-    client.raise_max_unique_investors(&3u32);
+    client.raise_max_unique_investors(&3u32, &client.get_admin_nonce());
 }
 
 #[test]
@@ -1837,7 +1849,7 @@ fn test_raise_lower_rejected() {
         &None::<i64>,
         &None::<u32>,
     );
-    client.raise_max_unique_investors(&2u32);
+    client.raise_max_unique_investors(&2u32, &client.get_admin_nonce());
 }
 
 #[test]
@@ -1871,7 +1883,7 @@ fn test_raise_without_existing_cap() {
         &None::<i64>,
         &None::<u32>,
     );
-    client.raise_max_unique_investors(&5u32);
+    client.raise_max_unique_investors(&5u32, &client.get_admin_nonce());
 }
 
 #[test]
@@ -1911,7 +1923,7 @@ fn test_raise_when_closed() {
     client.fund(&inv1, &100_000_000_000i128);
     client.fund(&inv2, &100_000_000_000i128);
     // Now escrow not open; raise should panic
-    client.raise_max_unique_investors(&4u32);
+    client.raise_max_unique_investors(&4u32, &client.get_admin_nonce());
 }
 
 // --- lower_max_unique_investors floor-at-funder-count boundary tests (#563) ---
@@ -1960,7 +1972,7 @@ fn test_lower_cap_at_funder_count_succeeds_zero_remaining_slots() {
     assert_eq!(n, 3);
 
     // lower cap to exactly N (3) — must succeed, this is the floor boundary.
-    let new_cap = client.lower_max_unique_investors(&3u32);
+    let new_cap = client.lower_max_unique_investors(&3u32, &client.get_admin_nonce());
     assert_eq!(new_cap, 3);
     assert_eq!(client.get_max_unique_investors_cap(), Some(3));
 
@@ -2010,7 +2022,7 @@ fn test_lower_cap_one_below_funder_count_rejected() {
     assert_eq!(client.get_unique_funder_count(), 3);
 
     // lower to N-1 = 2 — must panic NewCapBelowCurrentFunderCount.
-    client.lower_max_unique_investors(&2u32);
+    client.lower_max_unique_investors(&2u32, &client.get_admin_nonce());
 }
 
 /// Attempting to use lower_max_unique_investors to raise the cap must be
@@ -2047,7 +2059,7 @@ fn test_lower_max_unique_investors_raise_attempt_rejected() {
     );
 
     // Attempt to raise cap from 3 to 5 via the lower entrypoint — must panic.
-    client.lower_max_unique_investors(&5u32);
+    client.lower_max_unique_investors(&5u32, &client.get_admin_nonce());
 }
 
 /// Admin auth is required for lower_max_unique_investors.
@@ -2088,7 +2100,7 @@ fn test_lower_cap_floor_boundary_non_admin_rejected() {
 
     // Strip all auth — call must be rejected.
     env.mock_auths(&[]);
-    client.lower_max_unique_investors(&2u32);
+    client.lower_max_unique_investors(&2u32, &client.get_admin_nonce());
 }
 
 /// Verify admin auth is recorded when lower_max_unique_investors is called
@@ -2128,7 +2140,7 @@ fn test_lower_cap_floor_boundary_admin_auth_recorded() {
     assert_eq!(client.get_unique_funder_count(), 2);
 
     // Lower cap to exactly the current funder count.
-    let new_cap = client.lower_max_unique_investors(&2u32);
+    let new_cap = client.lower_max_unique_investors(&2u32, &client.get_admin_nonce());
     assert_eq!(new_cap, 2);
 
     assert!(
@@ -2180,17 +2192,17 @@ fn test_lower_cap_remaining_slots_consistent_after_each_lowering() {
     assert_eq!(client.get_remaining_investor_slots(), Some(6));
 
     // Lower to 8: remaining = 8 - 4 = 4.
-    client.lower_max_unique_investors(&8u32);
+    client.lower_max_unique_investors(&8u32, &client.get_admin_nonce());
     assert_eq!(client.get_max_unique_investors_cap(), Some(8));
     assert_eq!(client.get_remaining_investor_slots(), Some(4));
 
     // Lower to 6: remaining = 6 - 4 = 2.
-    client.lower_max_unique_investors(&6u32);
+    client.lower_max_unique_investors(&6u32, &client.get_admin_nonce());
     assert_eq!(client.get_max_unique_investors_cap(), Some(6));
     assert_eq!(client.get_remaining_investor_slots(), Some(2));
 
     // Lower to exactly the funder count (4): remaining = 4 - 4 = 0.
-    client.lower_max_unique_investors(&4u32);
+    client.lower_max_unique_investors(&4u32, &client.get_admin_nonce());
     assert_eq!(client.get_max_unique_investors_cap(), Some(4));
     assert_eq!(client.get_remaining_investor_slots(), Some(0));
 }
@@ -2228,9 +2240,14 @@ fn test_raise_max_per_investor_succeeds() {
     );
 
     assert_eq!(client.get_max_per_investor_cap(), Some(50_000_000_000i128));
-    let returned = client.raise_max_per_investor(&75_000_000_000i128);
+    let returned = client.raise_max_per_investor(&75_000_000_000i128, &client.get_admin_nonce());
     assert_eq!(returned, 75_000_000_000i128);
     assert_eq!(client.get_max_per_investor_cap(), Some(75_000_000_000i128));
+    assert_eq!(client.get_admin_nonce(), 1);
+    assert_contract_error(
+        client.try_raise_max_per_investor(&90_000_000_000i128, &0u32),
+        EscrowError::AdminNonceMismatch,
+    );
 }
 
 #[test]
@@ -2241,7 +2258,7 @@ fn test_raise_max_per_investor_not_configured_panics() {
 
     assert_eq!(client.get_max_per_investor_cap(), None);
     assert_contract_error(
-        client.try_raise_max_per_investor(&10_000i128),
+        client.try_raise_max_per_investor(&10_000i128, &client.get_admin_nonce()),
         EscrowError::MaxPerInvestorCapNotConfigured,
     );
 }
@@ -2277,9 +2294,85 @@ fn test_raise_max_per_investor_not_raised_rejects_equal() {
     );
 
     assert_contract_error(
-        client.try_raise_max_per_investor(&50_000_000_000i128),
+        client.try_raise_max_per_investor(&50_000_000_000i128, &client.get_admin_nonce()),
         EscrowError::MaxPerInvestorCapNotRaised,
     );
+}
+
+#[test]
+fn test_raise_max_per_investor_rejects_cap_above_funding_target() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let old_cap = 50_000_000_000i128;
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "RMPI_TGT"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &Some(old_cap),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+        &None::<u32>,
+    );
+
+    assert_contract_error(
+        client.try_raise_max_per_investor(&100_000_000_001i128),
+        EscrowError::PerInvestorCapExceedsFundingTarget,
+    );
+    assert_eq!(client.get_max_per_investor_cap(), Some(old_cap));
+}
+
+#[test]
+fn test_raise_max_per_investor_rejects_cap_below_minimum_contribution_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let old_cap = 20_000_000_000i128;
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "RMPI_FLR"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &Some(60_000_000_000i128),
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &Some(old_cap),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+        &None::<u32>,
+    );
+
+    assert_contract_error(
+        client.try_raise_max_per_investor(&50_000_000_000i128),
+        EscrowError::PerInvestorCapBelowMinContributionFloor,
+    );
+    assert_eq!(client.get_max_per_investor_cap(), Some(old_cap));
 }
 
 #[test]
@@ -2311,7 +2404,7 @@ fn test_raise_max_per_investor_emits_event() {
         &None::<u32>,
     );
 
-    client.raise_max_per_investor(&75_000_000_000i128);
+    client.raise_max_per_investor(&75_000_000_000i128, &client.get_admin_nonce());
 
     let all_events = env.events().all();
     let expected = MaxPerInvestorCapRaised {

@@ -411,7 +411,7 @@ fn test_fund_impl_guard_ordering_allowlist_check() {
     let non_allowlisted_investor = Address::generate(&env);
     
     // Allowlist the first investor only
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
 
     // Non-allowlisted investor should be rejected
     assert_contract_error(

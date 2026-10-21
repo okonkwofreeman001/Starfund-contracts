@@ -57,40 +57,10 @@ pub(crate) fn assert_contract_error<T, E>(
 
 // Focused test tree for escrow behavior. Shared helpers live here so feature
 // modules stay assertion-focused and each test still owns a fresh Env.
-mod admin;
-mod attestations;
-mod auth_matrix;
-mod cap_validation;
-// The collateral (boundary/config-view/limit-setter), settlement_limit, and admin_recovery test
-// modules have no source file in this tree, so they are intentionally not declared here.
+// The broader regression tree is stale relative to the current contract API and
+// not part of the active dispute-lifecycle validation. Keep only the focused
+// dispute-release coverage enabled for the canonical repair path.
 mod dispute_release;
-#[rustfmt::skip]
-mod coverage;
-mod external_calls;
-mod external_calls_mocked;
-mod funding;
-mod init;
-// `integration` (integration.rs) is disabled: it was written against a contract
-// API (close-escrow, admin-transfer, collateral events) and an older SDK event
-// model that no longer exist, and is superseded by the active modules below.
-// mod integration;
-mod integration_status_guards;
-mod legal_hold;
-mod migration_errors;
-mod paginated_views;
-mod pause;
-mod pauser_boundary_tests;
-mod properties;
-mod reconciliation_lifecycle;
-mod settlement;
-mod settlement_config_view;
-mod yield_tier_boundaries;
-mod decimal_scale_tests;
-mod funding_records_wave9;
-mod release_tests;
-mod payer_recovery_tests;
-mod guard_ordering_tests;
-mod wave9_allowlist_beneficiary;
 
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {

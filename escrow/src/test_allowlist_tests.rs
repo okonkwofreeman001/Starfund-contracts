@@ -583,7 +583,7 @@ fn gate_fund_allowlist_active_investor_denied_returns_typed_error() {
 
     let investor = Address::generate(&env);
     client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &false);
+    client.set_investor_allowlisted(&investor, &false, &0u32);
 
     assert_contract_error_gate(
         client.try_fund(&investor, &1_000i128),
@@ -618,7 +618,7 @@ fn gate_fwc_allowlist_active_investor_allowed_succeeds() {
 
     let investor = Address::generate(&env);
     client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
 
     let escrow = client.fund_with_commitment(&investor, &4_000i128, &0u64);
     assert_eq!(escrow.funded_amount, 4_000i128);
@@ -653,7 +653,7 @@ fn gate_fwc_allowlist_active_investor_denied_returns_typed_error() {
 
     let investor = Address::generate(&env);
     client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &false);
+    client.set_investor_allowlisted(&investor, &false, &0u32);
 
     assert_contract_error_gate(
         client.try_fund_with_commitment(&investor, &1_000i128, &0u64),
@@ -753,13 +753,13 @@ fn gate_revoke_mid_funding_blocks_next_deposit_fund() {
 
     // Step 1: allowlist active, investor allowed — first deposit succeeds.
     client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
     let after_first = client.fund(&investor, &3_000i128);
     assert_eq!(after_first.funded_amount, 3_000i128);
     assert_eq!(client.get_contribution(&investor), 3_000i128);
 
     // Step 2: admin revokes the investor.
-    client.set_investor_allowlisted(&investor, &false);
+    client.set_investor_allowlisted(&investor, &false, &0u32);
     assert!(!client.is_investor_allowlisted(&investor));
 
     // Step 3: second deposit must be rejected with InvestorNotAllowlisted.
@@ -787,8 +787,8 @@ fn gate_revoke_before_first_fwc_deposit_blocks_it() {
 
     // Allowlist investor, then revoke before they deposit.
     client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &true);
-    client.set_investor_allowlisted(&investor, &false);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
+    client.set_investor_allowlisted(&investor, &false, &0u32);
 
     assert_contract_error_gate(
         client.try_fund_with_commitment(&investor, &5_000i128, &0u64),
@@ -1354,7 +1354,7 @@ fn allowlist_capacity_limit_1_blocks_second_investor() {
     let a = Address::generate(&env);
     let b = Address::generate(&env);
 
-    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&a, &true, &0u32);
     assert!(client.is_investor_allowlisted(&a));
 
     assert_contract_error_gate(
@@ -1378,7 +1378,7 @@ fn allowlist_capacity_at_exact_limit_blocks_next_addition() {
 
     for _ in 0..limit {
         let addr = Address::generate(&env);
-        client.set_investor_allowlisted(&addr, &true);
+        client.set_investor_allowlisted(&addr, &true, &0u32);
     }
 
     let extra = Address::generate(&env);
@@ -1400,10 +1400,10 @@ fn allowlist_readd_already_allowlisted_is_idempotent_and_does_not_count_twice() 
     client.set_allowlist_limit(&1u32);
 
     let a = Address::generate(&env);
-    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&a, &true, &0u32);
 
     // Re-adding should not fail, even though the list is at capacity.
-    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&a, &true, &0u32);
     assert!(client.is_investor_allowlisted(&a));
 }
 
@@ -1420,7 +1420,7 @@ fn allowlist_removal_frees_slot_for_new_entry() {
     let a = Address::generate(&env);
     let b = Address::generate(&env);
 
-    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&a, &true, &0u32);
 
     // Adding b fails — at capacity.
     assert_contract_error_gate(
@@ -1429,10 +1429,10 @@ fn allowlist_removal_frees_slot_for_new_entry() {
     );
 
     // Remove a — slot freed.
-    client.set_investor_allowlisted(&a, &false);
+    client.set_investor_allowlisted(&a, &false, &0u32);
 
     // Now b can be added.
-    client.set_investor_allowlisted(&b, &true);
+    client.set_investor_allowlisted(&b, &true, &0u32);
     assert!(client.is_investor_allowlisted(&b));
     assert!(!client.is_investor_allowlisted(&a));
 }
@@ -1454,7 +1454,7 @@ fn allowlist_batch_rejected_when_exceeds_limit() {
     client.set_allowlist_limit(&2u32);
 
     let existing = Address::generate(&env);
-    client.set_investor_allowlisted(&existing, &true);
+    client.set_investor_allowlisted(&existing, &true, &0u32);
 
     let new_a = Address::generate(&env);
     let new_b = Address::generate(&env);
@@ -1546,9 +1546,9 @@ fn allowlist_lowering_limit_does_not_evict_but_blocks_new_additions() {
     let c = Address::generate(&env);
     let d = Address::generate(&env);
 
-    client.set_investor_allowlisted(&a, &true);
-    client.set_investor_allowlisted(&b, &true);
-    client.set_investor_allowlisted(&c, &true);
+    client.set_investor_allowlisted(&a, &true, &0u32);
+    client.set_investor_allowlisted(&b, &true, &0u32);
+    client.set_investor_allowlisted(&c, &true, &0u32);
 
     // Lower the limit to 1.
     client.set_allowlist_limit(&1u32);
@@ -1567,9 +1567,9 @@ fn allowlist_lowering_limit_does_not_evict_but_blocks_new_additions() {
     let removed = Address::generate(&env);
 
     client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &true);
-    client.set_investor_allowlisted(&removed, &true);
-    client.set_investor_allowlisted(&removed, &false);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
+    client.set_investor_allowlisted(&removed, &true, &0u32);
+    client.set_investor_allowlisted(&removed, &false, &0u32);
 
     let metadata = client.get_allowlist_metadata();
 
@@ -1635,7 +1635,7 @@ fn overflow_get_allowlisted_investors_max_start_one_investor() {
     init(&env, &client);
 
     let inv = Address::generate(&env);
-    client.set_investor_allowlisted(&inv, &true);
+    client.set_investor_allowlisted(&inv, &true, &0u32);
 
     // len = 1; start = u32::MAX >= 1 → early-exit fires, no addition.
     let result = client.get_allowlisted_investors(&u32::MAX, &1);
@@ -1658,7 +1658,7 @@ fn saturation_get_allowlisted_investors_near_max_start() {
     init(&env, &client);
 
     let inv = Address::generate(&env);
-    client.set_investor_allowlisted(&inv, &true);
+    client.set_investor_allowlisted(&inv, &true, &0u32);
 
     // start = u32::MAX - 1 ≥ len = 1 → early-exit.
     let result = client.get_allowlisted_investors(&(u32::MAX - 1), &50);
@@ -1697,7 +1697,7 @@ fn saturation_get_allowlisted_investors_zero_start_max_limit_clamped() {
 
     for _ in 0..3 {
         let addr = Address::generate(&env);
-        client.set_investor_allowlisted(&addr, &true);
+        client.set_investor_allowlisted(&addr, &true, &0u32);
     }
 
     let result = client.get_allowlisted_investors(&0, &u32::MAX);
@@ -1722,7 +1722,7 @@ fn saturation_get_allowlisted_investors_last_valid_start() {
     let mut addrs = soroban_sdk::Vec::new(&env);
     for _ in 0..5 {
         let addr = Address::generate(&env);
-        client.set_investor_allowlisted(&addr, &true);
+        client.set_investor_allowlisted(&addr, &true, &0u32);
         addrs.push_back(addr);
     }
 
@@ -1744,7 +1744,7 @@ fn saturation_get_allowlisted_investors_limit_above_ceiling_clamped() {
     // Add 60 investors
     for _ in 0..60 {
         let addr = Address::generate(&env);
-        client.set_investor_allowlisted(&addr, &true);
+        client.set_investor_allowlisted(&addr, &true, &0u32);
     }
 
     let result = client.get_allowlisted_investors(&0, &51);
@@ -1777,7 +1777,7 @@ fn count_get_allowlisted_investors_count_increments_correctly() {
     for i in 1u32..=5 {
         let addr = Address::generate(&env);
         addrs.push(addr.clone());
-        client.set_investor_allowlisted(&addr, &true);
+        client.set_investor_allowlisted(&addr, &true, &0u32);
         assert_eq!(
             client.get_allowlisted_investors_count(),
             i,
@@ -1798,22 +1798,22 @@ fn count_get_allowlisted_investors_count_decrements_on_revoke() {
     let b = Address::generate(&env);
     let c = Address::generate(&env);
 
-    client.set_investor_allowlisted(&a, &true);
-    client.set_investor_allowlisted(&b, &true);
-    client.set_investor_allowlisted(&c, &true);
+    client.set_investor_allowlisted(&a, &true, &0u32);
+    client.set_investor_allowlisted(&b, &true, &0u32);
+    client.set_investor_allowlisted(&c, &true, &0u32);
     assert_eq!(client.get_allowlisted_investors_count(), 3);
 
-    client.set_investor_allowlisted(&b, &false);
+    client.set_investor_allowlisted(&b, &false, &0u32);
     assert_eq!(
         client.get_allowlisted_investors_count(),
         2,
         "revoke must decrement count"
     );
 
-    client.set_investor_allowlisted(&a, &false);
+    client.set_investor_allowlisted(&a, &false, &0u32);
     assert_eq!(client.get_allowlisted_investors_count(), 1);
 
-    client.set_investor_allowlisted(&c, &false);
+    client.set_investor_allowlisted(&c, &false, &0u32);
     assert_eq!(
         client.get_allowlisted_investors_count(),
         0,
@@ -1830,13 +1830,13 @@ fn count_re_allowlist_idempotent_count() {
     init(&env, &client);
 
     let inv = Address::generate(&env);
-    client.set_investor_allowlisted(&inv, &true);
+    client.set_investor_allowlisted(&inv, &true, &0u32);
     assert_eq!(client.get_allowlisted_investors_count(), 1);
 
     // Setting the same address to true again: count must remain 1.
     // Note: the index only appends when was_allowlisted == false, so a double
     // set_true call is a no-op on the index.
-    client.set_investor_allowlisted(&inv, &true);
+    client.set_investor_allowlisted(&inv, &true, &0u32);
     assert_eq!(
         client.get_allowlisted_investors_count(),
         1,
@@ -1855,7 +1855,7 @@ fn count_metadata_allowlisted_count_matches_direct_count() {
 
     for _ in 0..4 {
         let addr = Address::generate(&env);
-        client.set_investor_allowlisted(&addr, &true);
+        client.set_investor_allowlisted(&addr, &true, &0u32);
     }
 
     let direct = client.get_allowlisted_investors_count();
@@ -1975,7 +1975,7 @@ fn pagination_full_scan_no_overflow_or_duplicates() {
     for _ in 0..n {
         let addr = Address::generate(&env);
         inserted.insert(addr.to_string());
-        client.set_investor_allowlisted(&addr, &true);
+        client.set_investor_allowlisted(&addr, &true, &0u32);
     }
 
     // Paginate with page size 5 → 3 pages (5, 5, 3).
@@ -1989,7 +1989,7 @@ fn pagination_full_scan_no_overflow_or_duplicates() {
             break;
         }
         for i in 0..page_len {
-            let addr_str = page.get(i).unwrap().to_string();
+            let addr_str = page.get(i).unwrap().to_string().to_string();
             assert!(
                 collected.insert(addr_str.clone()),
                 "duplicate address {addr_str} found in paginated results"
@@ -2019,7 +2019,7 @@ fn saturation_large_limit_from_mid_page_returns_tail() {
     let mut addrs = soroban_sdk::Vec::new(&env);
     for _ in 0..5 {
         let addr = Address::generate(&env);
-        client.set_investor_allowlisted(&addr, &true);
+        client.set_investor_allowlisted(&addr, &true, &0u32);
         addrs.push_back(addr);
     }
 

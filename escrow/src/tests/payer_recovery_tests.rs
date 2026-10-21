@@ -146,7 +146,7 @@ fn test_propose_payer_recovery_not_open_fails() {
     );
 
     // Cancel the escrow to move it out of open/funded status
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 
     let new_payer = Address::generate(&env);
     assert_contract_error(

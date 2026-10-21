@@ -36,6 +36,11 @@ pub(crate) fn investor_contribution(investor: Address) -> DataKey {
     DataKey::InvestorContribution(investor)
 }
 
+/// Per-investor persistent gross deposits, unaffected by unfunds or withdrawals.
+pub(crate) fn investor_total_deposited(investor: Address) -> DataKey {
+    DataKey::InvestorTotalDeposited(investor)
+}
+
 /// Per-investor persistent effective yield (bps) selected on the investor's first deposit.
 pub(crate) fn investor_effective_yield(investor: Address) -> DataKey {
     DataKey::InvestorEffectiveYield(investor)
@@ -44,6 +49,11 @@ pub(crate) fn investor_effective_yield(investor: Address) -> DataKey {
 /// Per-investor persistent claim-not-before ledger timestamp (`0` = no extra claim gate).
 pub(crate) fn investor_claim_not_before(investor: Address) -> DataKey {
     DataKey::InvestorClaimNotBefore(investor)
+}
+
+/// Per-investor original lock duration selected on the first funding call.
+pub(crate) fn investor_committed_lock_secs(investor: Address) -> DataKey {
+    DataKey::InvestorCommittedLockSecs(investor)
 }
 
 /// Per-investor persistent claimed-payout marker.
@@ -122,6 +132,11 @@ pub(crate) fn released_amount() -> DataKey {
 /// `get_sme_collateral_commitment`) all resolve the key through this helper.
 pub(crate) fn collateral_pledge_key() -> DataKey {
     DataKey::SmeCollateralPledge
+}
+
+/// Instance-storage commitments from the most recent collateral batch.
+pub(crate) fn collateral_pledge_batch_key() -> DataKey {
+    DataKey::SmeCollateralCommitmentBatch
 }
 
 #[cfg(test)]

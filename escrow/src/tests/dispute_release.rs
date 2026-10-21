@@ -7,18 +7,17 @@ use super::*;
 /// A real Stellar Asset Contract is used because `withdraw()` transfers the
 /// released principal to the SME and therefore needs an actual token balance on
 /// the contract.
-fn funded_client() -> (Env, StarfundEscrowClient<'static>, Address, Address) {
-    let env = Env::default();
+fn funded_client(env: &Env) -> (StarfundEscrowClient<'_>, Address, Address) {
     env.mock_all_auths();
-    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
     let token = sac.address();
-    let sac_admin = StellarAssetClient::new(&env, &token);
+    let sac_admin = StellarAssetClient::new(env, &token);
 
-    let (client, admin, sme) = setup(&env);
-    let (_, treasury) = free_addresses(&env);
+    let (client, admin, sme) = setup(env);
+    let (_, treasury) = free_addresses(env);
     client.init(
         &admin,
-        &String::from_str(&env, "DISPUTE001"),
+        &String::from_str(env, "DISPUTE001"),
         &sme,
         &100_000_000_000i128,
         &100i64,
@@ -37,17 +36,18 @@ fn funded_client() -> (Env, StarfundEscrowClient<'static>, Address, Address) {
         &None::<i64>,
         &None::<u32>,
     );
-    let investor = Address::generate(&env);
+    let investor = Address::generate(env);
     sac_admin.mint(&investor, &100_000_000_000i128);
     // Funding the full `funding_target` moves the escrow to status 1 (Funded).
     client.fund(&investor, &100_000_000_000i128);
     sac_admin.mint(&client.address, &100_000_000_000i128);
-    (env, client, admin, sme)
+    (client, admin, sme)
 }
 
 #[test]
 fn release_before_dispute_succeeds() {
-    let (_, client, _, _) = funded_client();
+    let env = Env::default();
+    let (client, _, _) = funded_client(&env);
     let before = client.get_escrow();
     // `withdraw()` is gated on `EscrowStatus::Funded`; asserting status 1 here
     // documents the precondition the release path depends on.
@@ -101,7 +101,8 @@ fn release_before_funding_is_rejected() {
 
 #[test]
 fn release_during_dispute_is_blocked() {
-    let (env, client, admin, _) = funded_client();
+    let env = Env::default();
+    let (client, admin, _) = funded_client(&env);
     client.open_dispute(&admin);
     assert!(client.is_dispute_active());
     assert!(client.get_escrow().dispute_active);
@@ -149,7 +150,8 @@ fn close_during_dispute_is_blocked() {
 
 #[test]
 fn dispute_opened_during_release_flow_blocks_release() {
-    let (_, client, admin, _) = funded_client();
+    let env = Env::default();
+    let (client, admin, _) = funded_client(&env);
     client.open_dispute(&admin);
     let result = client.try_withdraw();
     assert_contract_error(result, EscrowError::DisputeBlocksWithdrawal);
@@ -157,7 +159,8 @@ fn dispute_opened_during_release_flow_blocks_release() {
 
 #[test]
 fn dispute_resolved_then_release_succeeds() {
-    let (_, client, admin, _) = funded_client();
+    let env = Env::default();
+    let (client, admin, _) = funded_client(&env);
     client.open_dispute(&admin);
     client.close_dispute(&admin, &true);
 
@@ -168,7 +171,8 @@ fn dispute_resolved_then_release_succeeds() {
 
 #[test]
 fn rejected_dispute_resolution_is_explicit_and_non_mutating() {
-    let (_, client, admin, _) = funded_client();
+    let env = Env::default();
+    let (client, admin, _) = funded_client(&env);
     client.open_dispute(&admin);
     let before = client.get_dispute_record().unwrap();
 
@@ -181,8 +185,65 @@ fn rejected_dispute_resolution_is_explicit_and_non_mutating() {
 }
 
 #[test]
+fn set_dispute_active_resolves_through_dispute_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (_, treasury) = free_addresses(&env);
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &token);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "DISPUTE-LC"),
+        &sme,
+        &100_000_000_000i128,
+        &100i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+        &None::<u32>,
+    );
+    let investor = Address::generate(&env);
+    sac_admin.mint(&investor, &100_000_000_000i128);
+    client.fund(&investor, &100_000_000_000i128);
+    sac_admin.mint(&client.address, &100_000_000_000i128);
+
+    client.set_dispute_active(&true);
+    assert!(client.is_dispute_active());
+    assert!(client.get_escrow().dispute_active);
+    assert_eq!(
+        client.get_dispute_record().unwrap().state,
+        crate::DisputeState::Open
+    );
+
+    let events_before = env.events().all().events().len();
+    client.set_dispute_active(&false);
+
+    let record = client.get_dispute_record().unwrap();
+    assert_eq!(record.state, crate::DisputeState::Resolved);
+    assert!(record.resolved_at.is_some());
+    assert!(record.resolved_by.is_some());
+    assert!(!client.is_dispute_active());
+    assert!(!client.get_escrow().dispute_active);
+    assert_eq!(env.events().all().events().len(), events_before + 1);
+}
+
+#[test]
 fn unauthorized_dispute_close_panics() {
-    let (env, client, _, _) = funded_client();
+    let env = Env::default();
+    let (client, _, _) = funded_client(&env);
     let outsider = Address::generate(&env);
     let err = client.try_close_dispute(&outsider, &true);
     assert_contract_error(err, EscrowError::Unauthorized);
